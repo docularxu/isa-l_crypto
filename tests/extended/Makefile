@@ -16,4 +16,4 @@ $(addsuffix .run,$(tests)): %.run: %
 clean:
 	$(RM) *.o $(tests)
 
-$(tests): LDLIBS += -lcrypto
+$(tests): LDLIBS += -lcrypto -lpthread
