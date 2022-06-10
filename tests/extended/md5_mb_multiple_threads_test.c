@@ -38,6 +38,7 @@
 #include <semaphore.h>
 #include <errno.h>
 #include <time.h>
+#include <string.h>
 #include <openssl/md5.h>
 #include "md5_mb.h"
 #include "test.h"
@@ -83,6 +84,8 @@ typedef struct {
 	void		*cb_param;
 	sem_t		sem_job_done;		/* unlocked when MD5_mb_worker thread
 						 * finished processing of this CTX */
+	uint64_t	len_processed;		/* total length of data which has
+						 * been processed */
 } MD5_CTX_USERDATA;
 
 /* pre-allocated space for userdata[] */
@@ -285,19 +288,15 @@ static void *md5_mb_worker_thread_main(void *args)
 	}; // end of while
 }
 
-/* wd_do_digest_sync  --  
- *   This is the interface API published to upper layers. When called,
- *     it do MD5 digest calculation in a synchronised manner.
- * Return:
- *    0: succeeded
+/**
+ * @brief Allocate a CTX slot from the md5_ctx_pool and return the index
+ * @return:
+ *    0 or positive: succeed, return the CTX index
+ *    negative: failure
  *    -EBUSY: All CTXs in the md5_ctx_pool have been used. Upper
  *              layer can try again at a later time.
  */
-#ifdef DIGEST_VERIFY
-int wd_do_digest_sync(unsigned char *buff, uint32_t len, HASH_CTX_FLAG flags, unsigned char *md5_ssl)
-#else
-int wd_do_digest_sync(unsigned char *buff, uint32_t len, HASH_CTX_FLAG flags)
-#endif
+int wd_do_digest_init(void)
 {
 	int ctx_idx;
 	MD5_HASH_CTX *ctx;
@@ -308,22 +307,52 @@ int wd_do_digest_sync(unsigned char *buff, uint32_t len, HASH_CTX_FLAG flags)
 	if (ctx_idx < 0)
 		return -EBUSY;
 	ctx = &md5_ctx_pool.ctxpool[ctx_idx];
-	userdata = (MD5_CTX_USERDATA *)ctx->user_data;
+	userdata = (MD5_CTX_USERDATA *)hash_ctx_user_data(ctx);
 
-	// setup the CTX
 	//   - Init ctx contents
 	hash_ctx_init(ctx);
-	//   - set *buff and len into .userdata
-	userdata->buff = buff;
-	userdata->len = len;
-	//   - set has_next into .flags
-		// how? flags is type 'HASH_CTX_FLAG'
-	userdata->flags = flags;
+	//   - set len_processed to 0
+	userdata->len_processed = 0;
 	//   - set callback params into .userdata
 	userdata->cb_param = (void *)ctx;
 	//   - set callback into .userdata
 	userdata->cb = (md5_callback_t *)wd_md5_ctx_callback;
-	//   - set sem_job_done
+
+	return ctx_idx;
+}
+
+/**
+ * @brief Interface API published to upper layers. When called,
+ *     it do MD5 digest calculation in a synchronised manner.
+ *
+ * @param ctx_idx
+ * @param buff
+ * @param len
+ * @return
+ *    0: succeeded
+ *    negative: failure
+ */
+int wd_do_digest_sync(int ctx_idx, unsigned char *buff, uint32_t len)
+{
+
+	MD5_HASH_CTX *ctx;
+	MD5_CTX_USERDATA *userdata;
+
+	ctx = &md5_ctx_pool.ctxpool[ctx_idx];
+	userdata = (MD5_CTX_USERDATA *)hash_ctx_user_data(ctx);
+
+	//   - according to len_processed to set flags
+	if (userdata->len_processed == 0)
+		userdata->flags = HASH_FIRST;
+	else if (len == 0)
+		userdata->flags = HASH_LAST;
+	else
+		userdata->flags = HASH_UPDATE;
+
+	//   - set *buff and len into .userdata
+	userdata->buff = buff;
+	userdata->len = len;
+
 	// write 'ctx_idx' into pipe
 	write(pipefd[1], &ctx_idx, sizeof(ctx_idx));
 
@@ -333,15 +362,34 @@ int wd_do_digest_sync(unsigned char *buff, uint32_t len, HASH_CTX_FLAG flags)
 	// waiting on sem_job_done, ->cb() will unlock it when the job is done
 	sem_wait(&userdata->sem_job_done);
 
-	// release the semphore
-	// sem_destroy(&userdata->sem_job_done);
+	// update the len_processed
+	userdata->len_processed += len;
+	return 0;
+}
 
-	// TODO: what to do for the 'digest' result?
-	DBG_PRINT("job finished. ctx_idx %d, digest=", ctx_idx);
-	for (int j = 0; j < MD5_DIGEST_NWORDS; j++) {
-		DBG_PRINT("%08x,", ctx->job.result_digest[j]);
-	}
-	DBG_PRINT("\n");
+/**
+ * @brief retrieve the digest value and free the CTX slot
+ *
+ * @param ctx_idx
+ * @param digest
+ * @return
+ *    0: succeeded
+ *    negative: failure
+ */
+#ifdef DIGEST_VERIFY
+int wd_do_digest_final(int ctx_idx, unsigned char *digest, unsigned char *md5_ssl)
+#else
+int wd_do_digest_final(int ctx_idx, unsigned char *digest)
+#endif
+{
+	MD5_HASH_CTX *ctx;
+
+	ctx = &md5_ctx_pool.ctxpool[ctx_idx];
+
+	/* finalize this CTX */
+	wd_do_digest_sync(ctx_idx, NULL, 0);
+
+	memcpy(digest, hash_ctx_digest(ctx), MD5_DIGEST_LENGTH);
 
 #ifdef DIGEST_VERIFY
 	for (int j = 0; j < MD5_DIGEST_NWORDS; j++) {
@@ -353,9 +401,7 @@ int wd_do_digest_sync(unsigned char *buff, uint32_t len, HASH_CTX_FLAG flags)
 	}
 #endif
 
-	// TODO: when should the CTX be released? when yes, call:
 	ctx_slot_release(ctx_idx);
-
 	return 0;
 }
 
@@ -393,7 +439,7 @@ int md5_mb_bind_fn(void)
 }
 
 /* test stub */
-#define TEST_BUFS 32
+#define TEST_BUFS 16
 
 #ifdef CACHED_TEST
 // Loop many times over same data
@@ -410,7 +456,7 @@ int md5_mb_bind_fn(void)
 
 unsigned char *bufs[TEST_BUFS];		/* each bufs has a length of (TEST_LEN+offset) bytes */
 /* Reference digest global to reduce stack usage */
-static uint8_t digest_ssl[TEST_BUFS][4 * MD5_DIGEST_NWORDS];
+static uint8_t digest_ssl[TEST_BUFS][MD5_DIGEST_LENGTH];
 
 #define NUM_PRODUCERS (TEST_BUFS)
 pthread_t producer_threads[NUM_PRODUCERS];
@@ -426,29 +472,30 @@ int finished_jobs_counts;
 /* producer_thread_func */
 static void *producer_thread_func(void *args)
 {
+	unsigned char digest[MD5_DIGEST_LENGTH];
 	unsigned char **buf;
 	int buf_offset;		// buf offset, which determines the buf length
 	int loops = TEST_LOOPS;	// how many loops to run
+	int ctx_idx;
 	int ret;
 
 	buf = (unsigned char **)args;
 	buf_offset = buf - bufs;
 
-
 	/* submit a md5 request */
 	while (loops) {
-#ifdef DIGEST_VERIFY
-		ret = wd_do_digest_sync(*buf, TEST_LEN + buf_offset, HASH_ENTIRE, digest_ssl[buf_offset]);
-#else
-		ret = wd_do_digest_sync(*buf, TEST_LEN + buf_offset, HASH_ENTIRE);
-#endif
-		if (ret == -EBUSY) {
+		ctx_idx = wd_do_digest_init();
+		if (unlikely(ctx_idx == -EBUSY)) {
 			usleep(100);
 			continue;
-		} else {
-			loops --;
-			continue;
 		}
+		wd_do_digest_sync(ctx_idx, *buf, TEST_LEN + buf_offset);
+#ifdef DIGEST_VERIFY
+		wd_do_digest_final(ctx_idx, digest, digest_ssl[buf_offset]);
+#else
+		wd_do_digest_final(ctx_idx, digest);
+#endif
+		loops --;
 	}
 
 	pthread_mutex_lock(&mutex_counting);
@@ -499,6 +546,14 @@ int main(void)
 	/* perf stop */
 	perf_stop(&stop_ssl);
 
+	/* print performance: bandwidth */
+	printf("OpenSSL_ref" TEST_TYPE_STR "\t: ");
+	perf_print(stop_ssl, start_ssl,
+			(long long) TEST_LOOPS * 
+			(TEST_LEN + TEST_LEN + TEST_BUFS) *
+			NUM_PRODUCERS / 2);	/* LENGTH */
+
+
 	/* create md5_mb worker thread */
 	md5_mb_bind_fn();
 	DBG_PRINT("created md5_mb_worker_thread\n");
@@ -533,16 +588,9 @@ int main(void)
 	/* perf stop */
 	perf_stop(&stop);
 
-	/* print performance: bandwidth */
-	printf("OpenSSL Reference  \t: ");
-	perf_print(stop_ssl, start_ssl,
-			(long long) TEST_LOOPS * 
-			(TEST_LEN + TEST_LEN + TEST_BUFS) *
-			NUM_PRODUCERS / 2);	/* LENGTH */
-
 	printf("multibinary_md5" TEST_TYPE_STR "\t: ");
 	perf_print(stop, start,
-			(long long) TEST_LOOPS * 
+			(long long) TEST_LOOPS *
 			(TEST_LEN + TEST_LEN + NUM_PRODUCERS) *
 			NUM_PRODUCERS / 2);	/* LENGTH */
 

@@ -43,7 +43,7 @@
 #  define TEST_TYPE_STR "_warm"
 #else
 // Uncached test.  Pull from large mem base.
-#  define GT_L3_CACHE  32*1024*1024	/* some number > last level cache */
+#  define GT_L3_CACHE  320*1024*1024	/* some number > last level cache */
 #  define TEST_LEN     (GT_L3_CACHE / TEST_BUFS)
 #  define TEST_LOOPS   100
 #  define TEST_TYPE_STR "_cold"
