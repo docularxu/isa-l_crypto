@@ -39,6 +39,7 @@
 #include <errno.h>
 #include <time.h>
 #include <string.h>
+#include <sys/ioctl.h>
 #include <openssl/md5.h>
 #include "md5_mb.h"
 #include "test.h"
@@ -439,7 +440,7 @@ int md5_mb_bind_fn(void)
 }
 
 /* test stub */
-#define TEST_BUFS 16
+#define TEST_BUFS 1024
 
 #ifdef CACHED_TEST
 // Loop many times over same data
@@ -489,6 +490,14 @@ static void *producer_thread_func(void *args)
 			usleep(100);
 			continue;
 		}
+
+#if 0	/* check the number of unread bytes in pipe */
+	int nbytes;
+	ioctl(pipefd[1], FIONREAD, &nbytes);
+	if (unlikely(nbytes >= 0))
+		ERR_PRINT("UNREAD bytes in PIPE: %d\n", nbytes);
+#endif
+
 		wd_do_digest_sync(ctx_idx, *buf, TEST_LEN + buf_offset);
 #ifdef DIGEST_VERIFY
 		wd_do_digest_final(ctx_idx, digest, digest_ssl[buf_offset]);
@@ -537,7 +546,9 @@ int main(void)
 		rand_buffer(bufs[i], TEST_LEN + i);
 	}
 
+#ifdef DIGEST_VERIFY
 	// Start OpenSSL tests
+	printf("OpenSSL_ref" TEST_TYPE_STR "\t: ");
 	/* perf start */
 	perf_start(&start_ssl);
 	for(int j = 0; j < TEST_LOOPS; j++)
@@ -547,14 +558,14 @@ int main(void)
 	perf_stop(&stop_ssl);
 
 	/* print performance: bandwidth */
-	printf("OpenSSL_ref" TEST_TYPE_STR "\t: ");
 	perf_print(stop_ssl, start_ssl,
 			(long long) TEST_LOOPS * 
 			(TEST_LEN + TEST_LEN + TEST_BUFS) *
 			NUM_PRODUCERS / 2);	/* LENGTH */
-
+#endif
 
 	/* create md5_mb worker thread */
+	printf("multibinary_md5" TEST_TYPE_STR "\t: ");
 	md5_mb_bind_fn();
 	DBG_PRINT("created md5_mb_worker_thread\n");
 
@@ -588,7 +599,6 @@ int main(void)
 	/* perf stop */
 	perf_stop(&stop);
 
-	printf("multibinary_md5" TEST_TYPE_STR "\t: ");
 	perf_print(stop, start,
 			(long long) TEST_LOOPS *
 			(TEST_LEN + TEST_LEN + NUM_PRODUCERS) *
