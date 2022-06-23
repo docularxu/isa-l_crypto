@@ -43,27 +43,34 @@
 #include <openssl/md5.h>
 #include "md5_mb.h"
 #include "test.h"
+#include "mpscq.h"
+#include "mpsc.c"
 
 #define unlikely(x)	__builtin_expect((x), 0)
 #define likely(x)	__builtin_expect((x), 1)
 
+/* configurable MACROs */
 #define ERR_PRINT	printf
 // #define DBG_PRINT	printf
 #define DBG_PRINT
+#define DIGEST_VERIFY	/* verify the digest against OpenSSL */
+// #define USING_PIPE	/* when undefined, using queue */
+
 #define NUM_CTX_SLOTS	512	/* number of available CTX slots
 				 * in the CTX_POOL */
 #define CTX_FLUSH_NSEC		(10000)	/* nanoseconds before forced mb_flush */
 #define CTX_FLUSH_MIN_NSEC	(100)	/* minimum ns before forced mb_flush */
 #define max(a,b)		(((a) > (b)) ? (a) : (b))
 
-// #define DIGEST_VERIFY	/* verify the digest against OpenSSL */
-
-
+#ifdef USING_PIPE
 /* Inter-thread communication pipe
  *   One consumer: md5_mb_worker_thread_main
  *   Multiple producers: user threads who calls wd_digest APIs
  */
 int pipefd[2];
+#else /* using queue */
+struct mpscq *md5_mb_worker_queue;
+#endif
 
 /* handle of md5 multibuffer work thread */
 pthread_t md5_mbthread;
@@ -259,16 +266,45 @@ static void *md5_mb_worker_thread_main(void *args)
 		
 		if (ret == 0) {		// new CTX coming
 			// read in CTX index
+#ifdef USING_PIPE
 			ret = read(pipefd[0], &ctx_idx, sizeof(int));
 			if (unlikely(ret <= 0))
 				ERR_PRINT("Failed to read from pipe. ret=%d, errno=%d", ret, errno);
 			if (unlikely(ctx_idx >= NUM_CTX_SLOTS))
 				ERR_PRINT("Unexpected CTX slot index. ctx_idx=%d\n", ctx_idx);
 			ctx = &md5_ctx_pool.ctxpool[ctx_idx];
-			userdata = (MD5_CTX_USERDATA *)ctx->user_data;
-
 			DBG_PRINT("read from pipe, length=%d bytes, ctx_idx=%d\n",
 							ret, ctx_idx);
+#else /* using queue */
+			#if 0
+			int sval;
+			if (sem_getvalue(&md5_ctx_pool.sem_ctx_filled, &sval) == 0) {
+				ERR_PRINT("\t\t\t\tafter sem_wait: sem_getvalue: %d \n", sval);
+			}
+			ERR_PRINT("\t\t\t\tQueue ncount: %zu \n", mpscq_count(md5_mb_worker_queue));
+			#endif
+
+			while (unlikely((ctx = mpscq_dequeue(md5_mb_worker_queue)) == NULL)) {
+				// TODO: need to limit the times retry
+				ERR_PRINT("\t\t\t\tRETRY DEQUEUE...\n");
+				continue;
+			};
+
+			#if 0
+			if (unlikely(q_node == NULL)) {
+				ERR_PRINT("Unexpected: Empty queue. \n");
+				set_time_flush(&time_flush, TIME_FLUSH_FIRST);
+				continue;	// loop back for next
+			}
+			#endif
+
+			/* ctx_idx = ctx - &md5_ctx_pool.ctxpool[0]; */
+			// ERR_PRINT("\t\t\t\tQueue pop succeed: ctx_idx=%d \n", \
+							ctx - &md5_ctx_pool.ctxpool[0]);
+			// DBG_PRINT("read from pipe, length=%d bytes, ctx_idx=%d\n", \
+							ret, ctx - &md5_ctx_pool.ctxpool[0]);
+#endif
+			userdata = (MD5_CTX_USERDATA *)ctx->user_data;
 
 			// call _submit() on new CTX
 			ctx = md5_ctx_mgr_submit(&md5_ctx_mgr, ctx, userdata->buff,
@@ -354,9 +390,18 @@ int wd_do_digest_sync(int ctx_idx, unsigned char *buff, uint32_t len)
 	userdata->buff = buff;
 	userdata->len = len;
 
+#ifdef USING_PIPE
 	// write 'ctx_idx' into pipe
 	write(pipefd[1], &ctx_idx, sizeof(ctx_idx));
-
+#else /* using queue */
+	bool ret;
+	ret = mpscq_enqueue(md5_mb_worker_queue, ctx);
+	if (unlikely(ret == false)) {
+		ERR_PRINT("unexpeced, queue is full\n");
+		return -1;
+	}
+	// ERR_PRINT("Queue push: ctx_idx=%d\n", ctx_idx);
+#endif
 	// notify MD5 mb worker thread
 	sem_post(&md5_ctx_pool.sem_ctx_filled);
 
@@ -415,11 +460,15 @@ int md5_mb_bind_fn(void)
 {
 	int ret = 0;
 	
-	/* step 1: create a pipe for communitcations */
+	/* step 1: create an entity for communitcations */
+#ifdef USING_PIPE
 	if (pipe2(pipefd, O_DIRECT) != 0) {
 		ERR_PRINT("pipe creation failed\n");
 		return -1;
 	}
+#else /* using queue */
+	md5_mb_worker_queue = mpscq_create(NULL, NUM_CTX_SLOTS);
+#endif
 
 	/* step 1.1: initialize CTX pool */
 	if (ctx_pool_init() !=0) { ERR_PRINT("ctx_pool_init() failed\n");
@@ -492,10 +541,12 @@ static void *producer_thread_func(void *args)
 		}
 
 #if 0	/* check the number of unread bytes in pipe */
+#ifdef USING_PIPE
 	int nbytes;
 	ioctl(pipefd[1], FIONREAD, &nbytes);
 	if (unlikely(nbytes >= 0))
 		ERR_PRINT("UNREAD bytes in PIPE: %d\n", nbytes);
+#endif
 #endif
 
 		wd_do_digest_sync(ctx_idx, *buf, TEST_LEN + buf_offset);
@@ -613,5 +664,10 @@ int main(void)
 
 	/* on hold */
 	pthread_cancel(md5_mbthread);
+
+#ifndef USING_PIPE
+	/* clear queue */
+	mpscq_destroy(md5_mb_worker_queue);
+#endif
 	return 0;
 }
