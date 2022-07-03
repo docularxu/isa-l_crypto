@@ -578,6 +578,9 @@ int wd_do_digest_final(int ctx_idx, unsigned char *digest)
  */
 int md5_mb_bind_fn(void)
 {
+	pthread_attr_t attr;
+	cpu_set_t cpus;
+	int cpubinds[] = {0, 4, 2, 6, 1, 5, 3, 7};
 	int ret = 0;
 	
 	/* step 0: initialize CTX pool */
@@ -603,14 +606,18 @@ int md5_mb_bind_fn(void)
 		md5_ctx_mgr_init(&md5_ctx_mgr[i]);
 
 		/* step 3: create md5_mb worker thread */
+		pthread_attr_init(&attr);
+		CPU_ZERO(&cpus);
+#if 1
+		/* set core to worker_thread i */
+		CPU_SET(cpubinds[(i) % sizeof(cpubinds)], &cpus);
+		pthread_attr_setaffinity_np(&attr, sizeof(cpu_set_t), &cpus);
+#endif
 		param_pthread[i] = i;
-		ret = pthread_create(&md5_mbthread[i], NULL,
+		ret = pthread_create(&md5_mbthread[i], &attr,
 				     &md5_mb_worker_thread_main, (void *)&param_pthread[i]);
 		if (ret != 0)
 			ERR_PRINT("md5_mb worker_thread %d pthread_create() failed\n", i);
-		/* TODO: set pthread affinity */
-		/*        int pthread_setaffinity_np(pthread_t thread, size_t cpusetsize,
-                                  const cpu_set_t *cpuset); */
 	}
 	return ret;
 }
