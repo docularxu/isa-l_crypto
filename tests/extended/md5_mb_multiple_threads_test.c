@@ -413,12 +413,32 @@ static int worker_thread_assign(void)
 	/* n_active is a local-copy of global n_active_workers */
 	n_active = atomic_load(&n_active_workers);
 	/* rebalance is not needed */
+#if 0
 	if (count % REBALANCE_THRESHOLD != 0) {
 		return pick_a_worker_thread(count, n_active);
 	}
-
+#endif
 	/* rebalance */
 	upper = 0;
+	int retIdx = 0;
+	for (int i = 0; i < NUM_WORKER_THREADS; i++) {
+		q_len = mpscq_count(md5_mb_worker_queue[i]);
+		// printf("q: %d, q_len: %d\n", i, q_len);
+		if (q_len > QUEUE_COUNT_UPPER_LIMIT) {
+			upper++;
+		} else {
+			retIdx = i;
+			break;
+		}
+	}
+
+	if (upper >= NUM_WORKER_THREADS) {
+		// printf("upper = %d\n", upper);
+		return pick_a_worker_thread(count, NUM_WORKER_THREADS);
+	}
+
+	return retIdx;
+#if 0
 	lower = 0;
 	/* counting number of queue count in each range */
 	for (int i = 0; i < n_active; i ++) {
@@ -440,6 +460,7 @@ static int worker_thread_assign(void)
 
 	// printf("rebalanced, n_active_workers=%d, count=%d\n", n_active, count);
 	return pick_a_worker_thread(count, n_active);
+#endif
 }
 
 /**
