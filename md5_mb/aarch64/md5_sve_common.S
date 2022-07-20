@@ -262,7 +262,6 @@
 
 .altmacro
 
-/*
 .macro load_word pipelines:req,windex:req,zreg0:req,zreg1
 	add	tmp,databuf,\windex * 4
 	ld1w	{ \zreg0\().s}, p0/z, [tmp, VOFFS.s, UXTW 2]	// gather-load
@@ -271,13 +270,10 @@
 		ld1w	{\zreg1\().s}, p1/z, [tmp, VOFFS.s, UXTW 2]
 	.endif
 .endm
-*/
 
-/*
 .macro load_words	index:req,mg:req
 	load_word	%num_pipelines,\index,MD5WORD\mg\()_0,MD5WORD\mg\()_1
 .endm
-*/
 
 .macro MD5_STEP_WRAPPER pipelines:req,windex:req,gindex:req,mg:req,func_f:req,bits:req,gindex_next,mg_next
 	.ifnb \gindex_next
