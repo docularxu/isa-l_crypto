@@ -51,15 +51,6 @@
 	copy_mb_16words	job_vec,databuf
 .endm
 
-.macro load_word pipelines:req,windex:req,zreg0:req,zreg1
-	add	tmp,databuf,\windex * 4
-	ld1w	{ \zreg0\().s}, p0/z, [tmp, VOFFS.s, UXTW 2]
-	.if	\pipelines > 1
-		add	tmp,tmp,veclen,lsl #6
-		ld1w	{\zreg1\().s}, p1/z, [tmp, VOFFS.s, UXTW 2]
-	.endif
-.endm
-
 #include "md5_sve_common.S"
 
 /* int md5_mb_sve_max_lanes()

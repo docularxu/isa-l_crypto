@@ -208,40 +208,93 @@
 	VB_1 .req TT
 .endm
 
-.macro MD5_STEP_x1	windex:req,mg:req,func_f:req,bits:req
+.macro MD5_STEP_x1	windex:req,mg:req,func_f:req,bits:req,gindex_next,mg_next
+	.ifnb \gindex_next
+		/* load_words	\gindex_next,\mg_next */
+		/* load_word	%num_pipelines,\gindex_next,
+		 *              MD5WORD\mg_next\()_0,
+		 *              MD5WORD\mg_next\()_1
+		 */
+		add	tmp,databuf,\gindex_next * 4
+	.endif
 	ld1rw	{VK.s},p0/z,[md5key_adr,windex * 4]
 	\func_f\()_x1
 	add	VTMP_0.s,VA_0.s,\mg\()_0.s
 	add	VF_0.s,VF_0.s,VK.s
+		.ifnb \gindex_next
+		ld1w	{ MD5WORD\mg_next\()_0.s}, p0/z, [tmp, VOFFS.s, UXTW 2]	// gather-load
+		.endif
 	add	VF_0.s,VF_0.s,VTMP_0.s
-	rotate_left_x1	VA_0,VF_0,VTMP_0,\bits
+	rotate_left_x1	VA_0,VF_0,VTMP_0,\bits	/* 3 instr. */
 	add	VA_0.s,VA_0.s,VB_0.s
 .endm
 
-.macro MD5_STEP_x2	windex:req,mg:req,func_f:req,bits:req
+.macro MD5_STEP_x2	windex:req,mg:req,func_f:req,bits:req,gindex_next,mg_next
+	.ifnb \gindex_next
+		/* load_words	\gindex_next,\mg_next */
+		/* load_word	%num_pipelines,\gindex_next,
+		 *              MD5WORD\mg_next\()_0,
+		 *              MD5WORD\mg_next\()_1
+		 */
+		add	tmp,databuf,\gindex_next * 4
+	.endif
 	ld1rw	{VK.s},p0/z,[md5key_adr,windex * 4]
 	\func_f\()_x2
 	add	VTMP_0.s,VA_0.s,\mg\()_0.s
 	add	VTMP_1.s,VA_1.s,\mg\()_1.s
+		.ifnb \gindex_next
+		ld1w	{ MD5WORD\mg_next\()_0.s}, p0/z, [tmp, VOFFS.s, UXTW 2]	// gather-load
+		.endif
 	add	VF_0.s,VF_0.s,VK.s
 	add	VF_1.s,VF_1.s,VK.s
+		.ifnb \gindex_next
+		add	tmp,tmp,veclen,lsl #6
+		.endif
 	add	VF_0.s,VF_0.s,VTMP_0.s
 	add	VF_1.s,VF_1.s,VTMP_1.s
+		.ifnb \gindex_next
+		ld1w	{ MD5WORD\mg_next\()_1.s}, p1/z, [tmp, VOFFS.s, UXTW 2]
+		.endif
 	rotate_left_x2	VA_0,VF_0,VTMP_0,\bits,VA_1,VF_1,VTMP_1,\bits
 	add	VA_0.s,VA_0.s,VB_0.s
 	add	VA_1.s,VA_1.s,VB_1.s
 .endm
 
 .altmacro
+
+/*
+.macro load_word pipelines:req,windex:req,zreg0:req,zreg1
+	add	tmp,databuf,\windex * 4
+	ld1w	{ \zreg0\().s}, p0/z, [tmp, VOFFS.s, UXTW 2]	// gather-load
+	.if	\pipelines > 1
+		add	tmp,tmp,veclen,lsl #6
+		ld1w	{\zreg1\().s}, p1/z, [tmp, VOFFS.s, UXTW 2]
+	.endif
+.endm
+*/
+
+/*
 .macro load_words	index:req,mg:req
 	load_word	%num_pipelines,\index,MD5WORD\mg\()_0,MD5WORD\mg\()_1
 .endm
+*/
 
 .macro MD5_STEP_WRAPPER pipelines:req,windex:req,gindex:req,mg:req,func_f:req,bits:req,gindex_next,mg_next
 	.ifnb \gindex_next
-		load_words	\gindex_next,\mg_next
+		/* load_words	\gindex_next,\mg_next */
+		/* load_word	%num_pipelines,\gindex_next,
+		 *              MD5WORD\mg_next\()_0,
+		 *              MD5WORD\mg_next\()_1
+		 */
+	/*	add	tmp,databuf,\gindex_next * 4
+		ld1w	{ MD5WORD\mg_next\()_0.s}, p0/z, [tmp, VOFFS.s, UXTW 2]	// gather-load
+		.if	\pipelines > 1
+			add	tmp,tmp,veclen,lsl #6
+			ld1w	{ MD5WORD\mg_next\()_1.s}, p1/z, [tmp, VOFFS.s, UXTW 2]
+		.endif
+	*/
 	.endif
-	MD5_STEP_x\pipelines\()	\windex,MD5WORD\mg\(),\func_f,\bits
+	MD5_STEP_x\pipelines\()	\windex,MD5WORD\mg\(),\func_f,\bits,gindex_next,mg_next
 .endm
 
 .macro exec_step windex:req,gindex:req,bits:req,gindex_next
