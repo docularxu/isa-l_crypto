@@ -239,6 +239,7 @@
 		add	tmp,databuf,\gindex_next * 4
 	.endif
 	ld1rw	{VK.s},p0/z,[md5key_adr,windex * 4]
+	prfw	PLDL1KEEP,p0,[md5key_adr, windex / 4, MUL VL]
 	\func_f\()_x2
 	add	VTMP_0.s,VA_0.s,\mg\()_0.s
 	add	VTMP_1.s,VA_1.s,\mg\()_1.s
