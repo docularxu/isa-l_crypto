@@ -39,6 +39,24 @@
 	ldr	tmp,[src],8
 	ldr	tmp,[tmp]
 	add	tmp,tmp,block_ctr,lsl 6
+/*
+ * ld1 and st1 are NEON instructions.
+ * Fixed length: 64 bytes, from [tmp] to [dst]
+ *
+ * Is this the best way to copy from here to there?
+ * Method 1: https://github.com/ARM-software/optimized-routines/blob/master/string/aarch64/memcpy-sve.S
+ *  using 'ldp' and 'stp'
+ * Method 2: https://github.com/ARM-software/optimized-routines/blob/master/string/aarch64/memcpy-advsimd.S
+ *  using 'ldp' and 'stp'
+ *
+ * Ref:
+ * 128-bit (opc == 10)
+ * LDP <Qt1>, <Qt2>, [<Xn|SP>], #<imm>
+ *
+ * Ref: in longer than 128bytes, arm-optimized-routine uses 'ld1b/ st1b'
+ * LD1B 	ld1b	z0.b, p0/z, [src, 0, mul vl]
+ *
+ */
 #if 0
 	ld1	{TMPV0.4s,TMPV1.4s,TMPV2.4s,TMPV3.4s}, [tmp]
 	st1	{TMPV0.4s,TMPV1.4s,TMPV2.4s,TMPV3.4s}, [dst],64
