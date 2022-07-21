@@ -53,8 +53,6 @@
 .endm
 
 .macro load_init
-	mov	tmpw,16
-	index VOFFS.s,0,tmpw
 	copy_mb_16words	job_vec,databuf
 .endm
 
@@ -105,6 +103,10 @@ md5_mb_sve:
 	mov	sp,databuf
 	adr	md5key_adr,MD5_CONST_KEYS
 	whilelo	p0.s,wzr,total_lanes
+	// initialize VOFFS
+	mov	tmpw,16
+	index	VOFFS.s,0,tmpw
+
 	mov	src,job_vec
 	mov	dst,abcd_buf
 	mov	counter,total_lanes
