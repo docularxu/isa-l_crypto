@@ -208,7 +208,7 @@
 	VB_1 .req TT
 .endm
 
-.macro MD5_STEP_x1	windex:req,mg:req,func_f:req,bits:req,gindex_next,mg_next
+.macro MD5_STEP_x1	windex:req,mg:req,func_f:req,bits:req,gindex_next,mg_next,gindex_next_next
 	.ifnb \gindex_next
 		/* load_words	\gindex_next,\mg_next */
 		/* load_word	%num_pipelines,\gindex_next,
@@ -220,16 +220,26 @@
 	ld1rw	{VK.s},p0/z,[md5key_adr,windex * 4]
 	\func_f\()_x1
 	add	VTMP_0.s,VA_0.s,\mg\()_0.s
-	add	VF_0.s,VF_0.s,VK.s
 		.ifnb \gindex_next
 		ld1w	{ MD5WORD\mg_next\()_0.s}, p0/z, [tmp, VOFFS.s, UXTW 2]	// gather-load
+		// gather prefetch
+		.ifnb \gindex_next_next
+			.if \gindex_next_next > \gindex_next
+				add tmp2,tmp,(\gindex_next_next - \gindex) * 4
+			.else
+				sub tmp2,tmp,(\gindex - \gindex_next_next) * 4
+			.endif
+			// PRFW <prfop>, <Pg>, [<Xn|SP>, <Zm>.S, <mod> #2]
+			prfw	PLDL1STRM,p0,[tmp2, VOFFS.s, UXTW 2]
 		.endif
+		.endif
+	add	VF_0.s,VF_0.s,VK.s
 	add	VF_0.s,VF_0.s,VTMP_0.s
 	rotate_left_x1	VA_0,VF_0,VTMP_0,\bits	/* 3 instr. */
 	add	VA_0.s,VA_0.s,VB_0.s
 .endm
 
-.macro MD5_STEP_x2	windex:req,mg:req,func_f:req,bits:req,gindex_next,mg_next
+.macro MD5_STEP_x2	windex:req,mg:req,func_f:req,bits:req,gindex_next,mg_next,gindex_next_next
 	.ifnb \gindex_next
 		/* load_words	\gindex_next,\mg_next */
 		/* load_word	%num_pipelines,\gindex_next,
@@ -245,17 +255,35 @@
 	add	VTMP_1.s,VA_1.s,\mg\()_1.s
 		.ifnb \gindex_next
 		ld1w	{ MD5WORD\mg_next\()_0.s}, p0/z, [tmp, VOFFS.s, UXTW 2]	// gather-load
+		// gather prefetch
+		.ifnb \gindex_next_next
+			.if \gindex_next_next > \gindex_next
+				add tmp2,tmp,(\gindex_next_next - \gindex) * 4
+			.else
+				sub tmp2,tmp,(\gindex - \gindex_next_next) * 4
+			.endif
+			// PRFW <prfop>, <Pg>, [<Xn|SP>, <Zm>.S, <mod> #2]
+			prfw	PLDL1STRM,p0,[tmp2, VOFFS.s, UXTW 2]
+		.endif
 		.endif
 	add	VF_0.s,VF_0.s,VK.s
 	add	VF_1.s,VF_1.s,VK.s
 		.ifnb \gindex_next
 		add	tmp,tmp,veclen,lsl #6
 		.endif
+	add	VF_0.s,VF_0.s,VK.s
 	add	VF_0.s,VF_0.s,VTMP_0.s
-	add	VF_1.s,VF_1.s,VTMP_1.s
 		.ifnb \gindex_next
 		ld1w	{ MD5WORD\mg_next\()_1.s}, p1/z, [tmp, VOFFS.s, UXTW 2]
+		// gather prefetch
+		.ifnb \gindex_next_next
+			add tmp2,tmp2,veclen,lsl #6
+			// PRFW <prfop>, <Pg>, [<Xn|SP>, <Zm>.S, <mod> #2]
+			prfw	PLDL1STRM,p0,[tmp2, VOFFS.s, UXTW 2]
 		.endif
+		.endif
+	add	VF_1.s,VF_1.s,VTMP_1.s
+	add	VF_0.s,VF_0.s,VK.s
 	rotate_left_x2	VA_0,VF_0,VTMP_0,\bits,VA_1,VF_1,VTMP_1,\bits
 	add	VA_0.s,VA_0.s,VB_0.s
 	add	VA_1.s,VA_1.s,VB_1.s
@@ -276,7 +304,7 @@
 	load_word	%num_pipelines,\index,MD5WORD\mg\()_0,MD5WORD\mg\()_1
 .endm
 
-.macro MD5_STEP_WRAPPER pipelines:req,windex:req,gindex:req,mg:req,func_f:req,bits:req,gindex_next,mg_next
+.macro MD5_STEP_WRAPPER pipelines:req,windex:req,mg:req,func_f:req,bits:req,gindex_next,mg_next,gindex_next_next
 	.ifnb \gindex_next
 		/* load_words	\gindex_next,\mg_next */
 		/* load_word	%num_pipelines,\gindex_next,
@@ -291,106 +319,110 @@
 		.endif
 	*/
 	.endif
-	MD5_STEP_x\pipelines\()	\windex,MD5WORD\mg\(),\func_f,\bits,gindex_next,mg_next
+	MD5_STEP_x\pipelines\()	\windex,MD5WORD\mg\(),\func_f,\bits,gindex_next,mg_next,gindex_next_next
 .endm
 
-.macro exec_step windex:req,gindex:req,bits:req,gindex_next
+/*
+ * gindex_next		: load into MD5WORD\mg_next\()_0 and _1
+ * gindex_next_next	: to be prefetched
+ */
+.macro exec_step windex:req,bits:req,gindex_next,gindex_next_next
 	.if \windex % 2 == 0
-		mg=0
-		mg_next=1
+		mg=0		/* mg is short for module(2) of windex */
+		mg_next=1	/* mg_next is for module(2) of (windex + 1) */
 	.else
 		mg=1
 		mg_next=0
 	.endif
 
 	.if \windex <= 15
-		MD5_STEP_WRAPPER	%num_pipelines,\windex,\gindex,%mg,FUNC_F0,\bits,\gindex_next,%mg_next
+		MD5_STEP_WRAPPER	%num_pipelines,\windex,%mg,FUNC_F0,\bits,\gindex_next,%mg_next,\gindex_next_next
 	.endif
 	.if \windex >= 16 && \windex <= 31
-		MD5_STEP_WRAPPER	%num_pipelines,\windex,\gindex,%mg,FUNC_F1,\bits,\gindex_next,%mg_next
+		MD5_STEP_WRAPPER	%num_pipelines,\windex,%mg,FUNC_F1,\bits,\gindex_next,%mg_next,\gindex_next_next
 	.endif
 	.if \windex >= 32 && \windex <= 47
-		MD5_STEP_WRAPPER	%num_pipelines,\windex,\gindex,%mg,FUNC_F2,\bits,\gindex_next,%mg_next
+		MD5_STEP_WRAPPER	%num_pipelines,\windex,%mg,FUNC_F2,\bits,\gindex_next,%mg_next,\gindex_next_next
 	.endif
 	.if \windex >= 48 && \windex < 63
-		MD5_STEP_WRAPPER	%num_pipelines,\windex,\gindex,%mg,FUNC_F3,\bits,\gindex_next,%mg_next
+		MD5_STEP_WRAPPER	%num_pipelines,\windex,%mg,FUNC_F3,\bits,\gindex_next,%mg_next,\gindex_next_next
 	.endif
 	.if \windex == 63
-		MD5_STEP_WRAPPER	%num_pipelines,\windex,\gindex,%mg,FUNC_F3,\bits
+		MD5_STEP_WRAPPER	%num_pipelines,\windex,%mg,FUNC_F3,\bits
 	.endif
 	SWAP_STATES
 .endm
 
 .macro exec_steps
-	exec_step 0,0,7,1
-	exec_step 1,1,12,2
-	exec_step 2,2,17,3
-	exec_step 3,3,22,4
-	exec_step 4,4,7,5
-	exec_step 5,5,12,6
-	exec_step 6,6,17,7
-	exec_step 7,7,22,8
-	exec_step 8,8,7,9
-	exec_step 9,9,12,10
-	exec_step 10,10,17,11
-	exec_step 11,11,22,12
-	exec_step 12,12,7,13
-	exec_step 13,13,12,14
-	exec_step 14,14,17,15
-	exec_step 15,15,22,1
-	exec_step 16,1,5,6
-	exec_step 17,6,9,11
-	exec_step 18,11,14,0
-	exec_step 19,0,20,5
-	exec_step 20,5,5,10
-	exec_step 21,10,9,15
-	exec_step 22,15,14,4
-	exec_step 23,4,20,9
-	exec_step 24,9,5,14
-	exec_step 25,14,9,3
-	exec_step 26,3,14,8
-	exec_step 27,8,20,13
-	exec_step 28,13,5,2
-	exec_step 29,2,9,7
-	exec_step 30,7,14,12
-	exec_step 31,12,20,5
-	exec_step 32,5,4,8
-	exec_step 33,8,11,11
-	exec_step 34,11,16,14
-	exec_step 35,14,23,1
-	exec_step 36,1,4,4
-	exec_step 37,4,11,7
-	exec_step 38,7,16,10
-	exec_step 39,10,23,13
-	exec_step 40,13,4,0
-	exec_step 41,0,11,3
-	exec_step 42,3,16,6
-	exec_step 43,6,23,9
-	exec_step 44,9,4,12
-	exec_step 45,12,11,15
-	exec_step 46,15,16,2
-	exec_step 47,2,23,0
-	exec_step 48,0,6,7
-	exec_step 49,7,10,14
-	exec_step 50,14,15,5
-	exec_step 51,5,21,12
-	exec_step 52,12,6,3
-	exec_step 53,3,10,10
-	exec_step 54,10,15,1
-	exec_step 55,1,21,8
-	exec_step 56,8,6,15
-	exec_step 57,15,10,6
-	exec_step 58,6,15,13
-	exec_step 59,13,21,4
-	exec_step 60,4,6,11
-	exec_step 61,11,10,2
-	exec_step 62,2,15,9
-	exec_step 63,9,21
+	exec_step 0,7,1,2
+	exec_step 1,12,2,3
+	exec_step 2,17,3,4
+	exec_step 3,22,4,5
+	exec_step 4,7,5,6
+	exec_step 5,12,6,7
+	exec_step 6,17,7,8
+	exec_step 7,22,8,9
+	exec_step 8,7,9,10
+	exec_step 9,12,10,11
+	exec_step 10,17,11,12
+	exec_step 11,22,12,13
+	exec_step 12,7,13,14
+	exec_step 13,12,14,15
+	exec_step 14,17,15,1
+	exec_step 15,22,1,6
+	exec_step 16,5,6,11
+	exec_step 17,9,11,0
+	exec_step 18,14,0,5
+	exec_step 19,20,5,10
+	exec_step 20,5,10,15
+	exec_step 21,9,15,4
+	exec_step 22,14,4,9
+	exec_step 23,20,9,14
+	exec_step 24,5,14,3
+	exec_step 25,9,3,8
+	exec_step 26,14,8,13
+	exec_step 27,20,13,2
+	exec_step 28,5,2,7
+	exec_step 29,9,7,12
+	exec_step 30,14,12,5
+	exec_step 31,20,5,8
+	exec_step 32,4,8,11
+	exec_step 33,11,11,14
+	exec_step 34,16,14,1
+	exec_step 35,23,1,4
+	exec_step 36,4,4,7
+	exec_step 37,11,7,10
+	exec_step 38,16,10,13
+	exec_step 39,23,13,0
+	exec_step 40,4,0,3
+	exec_step 41,11,3,6
+	exec_step 42,16,6,9
+	exec_step 43,23,9,12
+	exec_step 44,4,12,15
+	exec_step 45,11,15,2
+	exec_step 46,16,2,0
+	exec_step 47,23,0,7
+	exec_step 48,6,7,14
+	exec_step 49,10,14,5
+	exec_step 50,15,5,12
+	exec_step 51,21,12,3
+	exec_step 52,6,3,10
+	exec_step 53,10,10,1
+	exec_step 54,15,1,8
+	exec_step 55,21,8,15
+	exec_step 56,6,15,6
+	exec_step 57,10,6,13
+	exec_step 58,15,13,4
+	exec_step 59,21,4,11
+	exec_step 60,6,11,2
+	exec_step 61,10,2,9
+	exec_step 62,15,9
+	exec_step 63,21
 .endm
 
 .macro prepare_x1
 	load_words	0,0
-	orr	VAA_0.d,VA_0.d,VA_0.d
+	orr	VAA_0.d,VA_0.d,VA_0.d	/* VAA_0 = VA_0 */
 	orr	VBB_0.d,VB_0.d,VB_0.d
 	orr	VCC_0.d,VC_0.d,VC_0.d
 	orr	VDD_0.d,VD_0.d,VD_0.d
@@ -442,15 +474,17 @@
 .endm
 
 .macro md5_sve_save_stack
-	stp	d8,d9,[sp, -48]!
+	stp	d8,d9,[sp, -64]!
 	stp	d10,d11,[sp, 16]
 	stp	d12,d13,[sp, 32]
+	stp	x19,x20,[sp, 48]	// tmp2, tmp3
 .endm
 
 .macro md5_sve_restore_stack
 	ldp	d10,d11,[sp, 16]
 	ldp	d12,d13,[sp, 32]
-	ldp	d8,d9,[sp],48
+	ldp	x19,x20,[sp, 48]
+	ldp	d8,d9,[sp],64
 .endm
 
 	.section .rodata.cst16,"aM",@progbits,16

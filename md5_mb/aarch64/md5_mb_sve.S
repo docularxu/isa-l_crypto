@@ -106,6 +106,11 @@ md5_mb_sve_max_lanes:
 	abcd_buf	.req	x14
 	md5key_adr	.req	x15
 
+/* r16,r17,r18,r29,r30: special role registers, avoided */
+/* r19..r29 and SP must be preserved */
+	tmp2	.req	x19
+	tmp3	.req	x20
+
 	.global md5_mb_sve
 	.type md5_mb_sve, %function
 md5_mb_sve:
