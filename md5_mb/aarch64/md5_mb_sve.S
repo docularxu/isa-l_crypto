@@ -39,8 +39,15 @@
 	ldr	tmp,[src],8
 	ldr	tmp,[tmp]
 	add	tmp,tmp,block_ctr,lsl 6
+#if 0
 	ld1	{TMPV0.4s,TMPV1.4s,TMPV2.4s,TMPV3.4s}, [tmp]
 	st1	{TMPV0.4s,TMPV1.4s,TMPV2.4s,TMPV3.4s}, [dst],64
+#else
+	ldp	q20, q21, [tmp], 32
+	ldp	q22, q23, [tmp]
+	stp	q20, q21, [dst], 32
+	stp	q22, q23, [dst], 32
+#endif
 	subs	counter,counter,1
 	b.ne	10b
 .endm
