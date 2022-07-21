@@ -271,19 +271,17 @@
 		.ifnb \gindex_next
 		add	tmp,tmp,veclen,lsl #6
 		.endif
-	add	VF_0.s,VF_0.s,VK.s
 	add	VF_0.s,VF_0.s,VTMP_0.s
+	add	VF_1.s,VF_1.s,VTMP_1.s
 		.ifnb \gindex_next
 		ld1w	{ MD5WORD\mg_next\()_1.s}, p1/z, [tmp, VOFFS.s, UXTW 2]
 		// gather prefetch
 		.ifnb \gindex_next_next
 			add tmp2,tmp2,veclen,lsl #6
 			// PRFW <prfop>, <Pg>, [<Xn|SP>, <Zm>.S, <mod> #2]
-			prfw	PLDL1STRM,p0,[tmp2, VOFFS.s, UXTW 2]
+			prfw	PLDL1STRM,p1,[tmp2, VOFFS.s, UXTW 2]
 		.endif
 		.endif
-	add	VF_1.s,VF_1.s,VTMP_1.s
-	add	VF_0.s,VF_0.s,VK.s
 	rotate_left_x2	VA_0,VF_0,VTMP_0,\bits,VA_1,VF_1,VTMP_1,\bits
 	add	VA_0.s,VA_0.s,VB_0.s
 	add	VA_1.s,VA_1.s,VB_1.s
