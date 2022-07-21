@@ -225,9 +225,9 @@
 		// gather prefetch
 		.ifnb \gindex_next_next
 			.if \gindex_next_next > \gindex_next
-				add tmp2,tmp,(\gindex_next_next - \gindex) * 4
+				add tmp2,tmp,(\gindex_next_next - \gindex_next) * 4
 			.else
-				sub tmp2,tmp,(\gindex - \gindex_next_next) * 4
+				sub tmp2,tmp,(\gindex_next - \gindex_next_next) * 4
 			.endif
 			// PRFW <prfop>, <Pg>, [<Xn|SP>, <Zm>.S, <mod> #2]
 			prfw	PLDL1STRM,p0,[tmp2, VOFFS.s, UXTW 2]
@@ -258,9 +258,9 @@
 		// gather prefetch
 		.ifnb \gindex_next_next
 			.if \gindex_next_next > \gindex_next
-				add tmp2,tmp,(\gindex_next_next - \gindex) * 4
+				add tmp2,tmp,(\gindex_next_next - \gindex_next) * 4
 			.else
-				sub tmp2,tmp,(\gindex - \gindex_next_next) * 4
+				sub tmp2,tmp,(\gindex_next - \gindex_next_next) * 4
 			.endif
 			// PRFW <prfop>, <Pg>, [<Xn|SP>, <Zm>.S, <mod> #2]
 			prfw	PLDL1STRM,p0,[tmp2, VOFFS.s, UXTW 2]
