@@ -133,13 +133,17 @@ md5_mb_sve:
 	mov	src,job_vec
 	mov	dst,abcd_buf
 	mov	counter,total_lanes
+
+/* load initial digest[16 bytes] of each MD5_JOB and store to abcd_buf[] */
 .ldr_hash:
-	ldr	tmp,[src],8
-	add	tmp,tmp,64
+	ldr	tmp,[src],8		/* tmp: pointer to a MD5_JOB */
+	add	tmp,tmp,64		/* tmp: result_digest[], which is aligned to 64. See md5_mb.h */
 	ld1	{v0.16b},[tmp]
-	st1	{v0.16b},[dst],16
+	st1	{v0.16b},[dst],16	/* dst: initial digest of MD5_JOB */
 	subs	counter,counter,1
 	bne	.ldr_hash
+
+/* transpose of digest[], from abcd_buf[] into VA, VB, VC， VD */
 	ld4w	{VA_0.s,VB_0.s,VC_0.s,VD_0.s},p0/z,[abcd_buf]
 	mov	block_ctr,0
 	cntp	veclen,p0,p0.s
@@ -149,6 +153,8 @@ md5_mb_sve:
 	add	tmp,abcd_buf,veclen,lsl #4
 	ld4w	{VA_1.s,VB_1.s,VC_1.s,VD_1.s},p1/z,[tmp]
 	b	.loop_2x
+
+/* one multi-buffer pipeline */
 .loop_1x:
 	md5_single	1
 	add	block_ctr, block_ctr, 1
@@ -156,6 +162,8 @@ md5_mb_sve:
 	bne	.loop_1x
 	st4w	{VA_0.s,VB_0.s,VC_0.s,VD_0.s},p0,[abcd_buf]
 	b	1f
+
+/* double multi-buffer pipelines */
 .loop_2x:
 	md5_single	2
 	add	block_ctr, block_ctr, 1

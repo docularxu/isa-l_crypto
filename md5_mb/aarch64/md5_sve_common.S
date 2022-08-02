@@ -67,8 +67,8 @@
 			lsr	\out\().s,\in\().s,32-\bits
 			orr	\out\().d,\out\().d,\tmp\().d
 		.else
-			movprfx	\out\().d,\in\().d
-			xar	\out\().s,\out\().s,VZERO.s,32-\bits
+			movprfx	\out\().d,\in\().d			/* to create a constructive instr. */
+			xar	\out\().s,\out\().s,VZERO.s,32-\bits	/* bitwise ex-or, and rotate */
 		.endif
 	.endif
 .endm
