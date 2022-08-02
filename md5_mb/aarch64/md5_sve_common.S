@@ -220,6 +220,9 @@
 	ld1rw	{VK.s},p0/z,[md5key_adr,windex * 4]
 	\func_f\()_x1
 	add	VTMP_0.s,VA_0.s,\mg\()_0.s
+	add	VF_0.s,VF_0.s,VK.s
+	add	VF_0.s,VF_0.s,VTMP_0.s
+	rotate_left_x1	VA_0,VF_0,VTMP_0,\bits	/* 3 instr. */
 		.ifnb \gindex_next
 		ld1w	{ MD5WORD\mg_next\()_0.s}, p0/z, [tmp, VOFFS.s, UXTW 2]	// gather-load
 		// gather prefetch
@@ -230,24 +233,19 @@
 				sub tmp2,tmp,(\gindex_next - \gindex_next_next) * 4
 			.endif
 			// PRFW <prfop>, <Pg>, [<Xn|SP>, <Zm>.S, <mod> #2]
-			prfw	PLDL1STRM,p0,[tmp2, VOFFS.s, UXTW 2]
+			prfw	PLDL1KEEP,p0,[tmp2, VOFFS.s, UXTW 2]
 		.endif
 		.endif
-	add	VF_0.s,VF_0.s,VK.s
-	add	VF_0.s,VF_0.s,VTMP_0.s
-	rotate_left_x1	VA_0,VF_0,VTMP_0,\bits	/* 3 instr. */
 	add	VA_0.s,VA_0.s,VB_0.s
 .endm
 
 .macro MD5_STEP_x2	windex:req,mg:req,func_f:req,bits:req,gindex_next,mg_next,gindex_next_next
 	.ifnb \gindex_next
-		/* load_words	\gindex_next,\mg_next */
-		/* load_word	%num_pipelines,\gindex_next,
-		 *              MD5WORD\mg_next\()_0,
-		 *              MD5WORD\mg_next\()_1
-		 */
 		add	tmp,databuf,\gindex_next * 4
 	.endif
+		.ifnb \gindex_next
+		add	tmp3,tmp,veclen,lsl #6
+		.endif
 	ld1rw	{VK.s},p0/z,[md5key_adr,windex * 4]
 	prfw	PLDL1KEEP,p0,[md5key_adr, windex / 4, MUL VL]
 	\func_f\()_x2
@@ -255,6 +253,14 @@
 	add	VTMP_1.s,VA_1.s,\mg\()_1.s
 		.ifnb \gindex_next
 		ld1w	{ MD5WORD\mg_next\()_0.s}, p0/z, [tmp, VOFFS.s, UXTW 2]	// gather-load
+		.endif
+	add	VF_0.s,VF_0.s,VK.s
+	add	VF_1.s,VF_1.s,VK.s
+	add	VF_0.s,VF_0.s,VTMP_0.s
+	add	VF_1.s,VF_1.s,VTMP_1.s
+	rotate_left_x2	VA_0,VF_0,VTMP_0,\bits,VA_1,VF_1,VTMP_1,\bits
+		.ifnb \gindex_next
+		ld1w	{ MD5WORD\mg_next\()_1.s}, p1/z, [tmp3, VOFFS.s, UXTW 2]
 		// gather prefetch
 		.ifnb \gindex_next_next
 			.if \gindex_next_next > \gindex_next
@@ -263,26 +269,15 @@
 				sub tmp2,tmp,(\gindex_next - \gindex_next_next) * 4
 			.endif
 			// PRFW <prfop>, <Pg>, [<Xn|SP>, <Zm>.S, <mod> #2]
-			prfw	PLDL1STRM,p0,[tmp2, VOFFS.s, UXTW 2]
+			prfw	PLDL1KEEP,p0,[tmp2, VOFFS.s, UXTW 2]
 		.endif
-		.endif
-	add	VF_0.s,VF_0.s,VK.s
-	add	VF_1.s,VF_1.s,VK.s
-		.ifnb \gindex_next
-		add	tmp,tmp,veclen,lsl #6
-		.endif
-	add	VF_0.s,VF_0.s,VTMP_0.s
-	add	VF_1.s,VF_1.s,VTMP_1.s
-		.ifnb \gindex_next
-		ld1w	{ MD5WORD\mg_next\()_1.s}, p1/z, [tmp, VOFFS.s, UXTW 2]
 		// gather prefetch
 		.ifnb \gindex_next_next
 			add tmp2,tmp2,veclen,lsl #6
 			// PRFW <prfop>, <Pg>, [<Xn|SP>, <Zm>.S, <mod> #2]
-			prfw	PLDL1STRM,p1,[tmp2, VOFFS.s, UXTW 2]
+			prfw	PLDL1KEEP,p1,[tmp2, VOFFS.s, UXTW 2]
 		.endif
 		.endif
-	rotate_left_x2	VA_0,VF_0,VTMP_0,\bits,VA_1,VF_1,VTMP_1,\bits
 	add	VA_0.s,VA_0.s,VB_0.s
 	add	VA_1.s,VA_1.s,VB_1.s
 .endm
