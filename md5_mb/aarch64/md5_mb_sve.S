@@ -37,7 +37,6 @@
 	mov	counter,total_lanes
 10:
 	ldr	tmp,[src],8
-	ldr	tmp,[tmp]
 	add	tmp,tmp,block_ctr,lsl 6
 /*
  * ld1 and st1 are NEON instructions.
@@ -71,7 +70,7 @@
 .endm
 
 .macro load_init
-	copy_mb_16words	job_vec,databuf
+	copy_mb_16words	data_pointers,databuf
 .endm
 
 #include "md5_sve_common.S"
@@ -91,7 +90,8 @@ md5_mb_sve_max_lanes:
  */
 	num_blocks	.req	w0
 	total_lanes	.req	w1
-	job_vec	.req	x2
+	job_vec		.req	x2
+	data_pointers	.req	x3
 	src	.req	x5
 	dst	.req	x6
 	tmp	.req	x8
@@ -123,7 +123,11 @@ md5_mb_sve:
 	// reserve (64 * lanes) for data buf
 	mov	tmpw,total_lanes,lsl 6
 	sub	databuf,abcd_buf,tmp
-	mov	sp,databuf
+	// reserve (8 * lanes) for buffer pointers of all MD5_JOBs
+	mov	tmpw,total_lanes,lsl 3
+	sub	data_pointers,databuf,tmp
+	// set sp
+	mov	sp,data_pointers
 	adr	md5key_adr,MD5_CONST_KEYS
 	whilelo	p0.s,wzr,total_lanes
 	// initialize VOFFS
@@ -132,11 +136,16 @@ md5_mb_sve:
 
 	mov	src,job_vec
 	mov	dst,abcd_buf
+	mov	tmp2,data_pointers
 	mov	counter,total_lanes
 
-/* load initial digest[16 bytes] of each MD5_JOB and store to abcd_buf[] */
+/* load initial digest[16 bytes] of each MD5_JOB and store to abcd_buf[]
+ * collect *buffer pointer of all MD5_JOBs and store to data_pointers[]
+ */
 .ldr_hash:
 	ldr	tmp,[src],8		/* tmp: pointer to a MD5_JOB */
+	ldr	tmp3,[tmp]		/* tmp3: buffer pointer of this MD5_JOB */
+	str	tmp3,[tmp2],8		/* store to data_pointers[] */
 	add	tmp,tmp,64		/* tmp: result_digest[], which is aligned to 64. See md5_mb.h */
 	ld1	{v0.16b},[tmp]
 	st1	{v0.16b},[dst],16	/* dst: initial digest of MD5_JOB */
