@@ -6,6 +6,10 @@
 *.dll
 *.exp
 *.lib
+*.log
+*.trs
+*_test
+*_perf
 bin
 
 # Autobuild
